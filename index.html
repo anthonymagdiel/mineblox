@@ -1,0 +1,1128 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172b45">
+  <title>Tierras Salvajes — aventura sandbox</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Trebuchet MS", system-ui, sans-serif;
+      background: #101927;
+      color: #f5f4e9;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      background:
+        radial-gradient(ellipse at 50% 0%, #294867 0%, transparent 58%),
+        linear-gradient(160deg, #18283a, #101722 72%);
+    }
+
+    main { width: min(100%, 1060px); }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 0 2px 12px;
+    }
+
+    h1 {
+      margin: 0;
+      color: #ffe59a;
+      font-size: clamp(1.45rem, 4vw, 2rem);
+      letter-spacing: .04em;
+      text-shadow: 0 3px 0 #634c3b;
+    }
+
+    .subtitle { margin: 4px 0 0; color: #c2d0dc; font-size: .9rem; }
+
+    .badge {
+      flex: 0 0 auto;
+      border: 1px solid #8eae88;
+      border-radius: 999px;
+      padding: 6px 11px;
+      color: #d7edbd;
+      background: #304b3d;
+      font-size: .76rem;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .frame {
+      position: relative;
+      overflow: hidden;
+      border: 3px solid #526578;
+      border-radius: 12px;
+      background: #162438;
+      box-shadow: 0 18px 55px #0008, inset 0 0 0 2px #17283b;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .help {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px 18px;
+      padding: 11px 14px;
+      color: #d3deea;
+      background: #172539;
+      font-size: .82rem;
+    }
+
+    .help strong { color: #ffe59a; }
+    .help span { white-space: nowrap; }
+
+    .chat-panel {
+      position: absolute;
+      z-index: 2;
+      bottom: 86px;
+      left: 14px;
+      display: flex;
+      width: min(330px, calc(100% - 28px));
+      flex-direction: column;
+      gap: 7px;
+      padding: 10px;
+      border: 1px solid #b7c8d58c;
+      border-radius: 8px;
+      background: #101b2cdb;
+      box-shadow: 0 5px 18px #0005;
+    }
+
+    .chat-panel[hidden] { display: none; }
+
+    .chat-messages {
+      display: flex;
+      max-height: 110px;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      color: #e5edf1;
+      font-size: .78rem;
+      overflow-wrap: anywhere;
+    }
+
+    .chat-message strong { color: #ffe59a; }
+
+    .chat-panel input {
+      width: 100%;
+      border: 1px solid #8397a8;
+      border-radius: 5px;
+      padding: 8px;
+      color: #fff;
+      background: #172539;
+      font: inherit;
+      font-size: .85rem;
+    }
+
+    .chat-hint { color: #c1cfdb; font-size: .72rem; }
+
+    @media (max-width: 620px) {
+      body { padding: 12px; }
+      header { align-items: start; }
+      .badge { display: none; }
+      .help { font-size: .74rem; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Tierras Salvajes</h1>
+        <p class="subtitle">Un pequeño mundo de exploración, minería y construcción.</p>
+      </div>
+      <span class="badge">Mundo nuevo · Día 1</span>
+    </header>
+    <section class="frame" aria-label="Juego Tierras Salvajes">
+      <canvas id="game" width="960" height="540" aria-label="Mundo de juego"></canvas>
+      <div class="help">
+        <span><strong>A / D</strong> o <strong>← / →</strong> moverse</span>
+        <span><strong>Espacio</strong> saltar</span>
+        <span><strong>S / ↓</strong> agacharse</span>
+        <span><strong>Clic izq.</strong> minar / golpear animales</span>
+        <span><strong>Clic der.</strong> construir</span>
+        <span><strong>1–5</strong> elegir bloque</span>
+        <span><strong>E</strong> comer carne</span>
+        <span><strong>Enter</strong> chat / comando</span>
+      </div>
+      <div class="chat-panel" aria-label="Chat local" hidden>
+        <div class="chat-messages" aria-live="polite"></div>
+        <form class="chat-form">
+          <input class="chat-input" type="text" maxlength="120" placeholder="Mensaje o comando (ej.: volar)" autocomplete="off" aria-label="Mensaje o comando">
+        </form>
+        <span class="chat-hint">Chat de esta partida · escribe «volar» o «volar off»</span>
+      </div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.querySelector("#game");
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width;
+      const H = canvas.height;
+      const TILE = 24;
+      const WORLD_W = 190;
+      const WORLD_H = 72;
+      const GRAVITY = 1450;
+      const BLOCKS = {
+        1: { name: "Tierra", color: "#956044", edge: "#68472f", item: "tierra" },
+        2: { name: "Piedra", color: "#75808a", edge: "#4b5662", item: "piedra" },
+        3: { name: "Madera", color: "#9b663d", edge: "#684328", item: "madera" },
+        4: { name: "Hojas", color: "#4f9a58", edge: "#30653e", item: "hojas" },
+        5: { name: "Mineral", color: "#d59b4f", edge: "#926239", item: "mineral" }
+      };
+      const keys = new Set();
+      const inventory = { tierra: 8, piedra: 0, madera: 0, hojas: 0, mineral: 0, carne: 0 };
+      const hotbar = ["tierra", "piedra", "madera", "hojas", "mineral"];
+      const world = Array.from({ length: WORLD_H }, () => new Uint8Array(WORLD_W));
+      const heights = new Array(WORLD_W);
+      const particles = [];
+      const droppedBlocks = [];
+      const animals = [];
+      const chatPanel = document.querySelector(".chat-panel");
+      const chatForm = document.querySelector(".chat-form");
+      const chatInput = document.querySelector(".chat-input");
+      const chatMessages = document.querySelector(".chat-messages");
+      const clouds = Array.from({ length: 10 }, (_, i) => ({
+        x: i * 143 + 32, y: 38 + ((i * 47) % 112), speed: 5 + (i % 4) * 2,
+        width: 54 + (i % 3) * 20
+      }));
+      const player = {
+        x: 120, y: 0, w: 17, h: 31, vx: 0, vy: 0, grounded: false, facing: 1,
+        crouched: false, walkTime: 0, walkBlend: 0, jumpHoldTime: 0, landTime: 0,
+        health: 100, hunger: 100, flying: false, hungerClock: 0, starveClock: 0
+      };
+      const camera = { x: 0, y: 0 };
+      const mouse = { x: 0, y: 0, left: false, right: false };
+      let selected = 0;
+      let mining = null;
+      let mineProgress = 0;
+      let jumpQueued = false;
+      let message = "¡Explora el mundo y construye tu refugio!";
+      let messageTime = 4;
+      let elapsed = 0;
+      let lastTime = 0;
+      let dayTime = 0.22;
+
+      function randomAt(x, salt = 0) {
+        const n = Math.sin(x * 127.1 + salt * 311.7) * 43758.5453;
+        return n - Math.floor(n);
+      }
+
+      function generateWorld() {
+        let level = 31;
+        for (let x = 0; x < WORLD_W; x++) {
+          level += (randomAt(x, 2) - 0.5) * 1.15;
+          const wave = Math.sin(x * 0.075) * 2.7 + Math.sin(x * 0.021) * 4.2;
+          const surface = Math.max(19, Math.min(43, Math.round(level + wave)));
+          heights[x] = surface;
+          for (let y = surface; y < WORLD_H; y++) {
+            if (y === surface) world[y][x] = 1;
+            else if (y < surface + 5) world[y][x] = 1;
+            else world[y][x] = randomAt(x * 4 + y, 7) > 0.965 ? 5 : 2;
+          }
+        }
+
+        for (let x = 5; x < WORLD_W - 5; x++) {
+          if (randomAt(x, 9) > 0.89 && Math.abs(x - 5) > 4) {
+            const base = heights[x];
+            const trunk = 3 + Math.floor(randomAt(x, 3) * 3);
+            for (let y = base - 1; y >= base - trunk; y--) world[y][x] = 3;
+            for (let yy = base - trunk - 2; yy <= base - trunk + 1; yy++) {
+              for (let xx = x - 2; xx <= x + 2; xx++) {
+                if (yy >= 0 && xx >= 0 && xx < WORLD_W && Math.abs(xx - x) + Math.abs(yy - (base - trunk)) < 4 && world[yy][xx] === 0) {
+                  world[yy][xx] = 4;
+                }
+              }
+            }
+          }
+        }
+
+        for (let i = 0; i < 17; i++) {
+          const tx = i === 0 ? 9 : 13 + Math.floor(randomAt(i, 17) * (WORLD_W - 26));
+          const surfaceY = heights[tx] * TILE;
+          animals.push({
+            x: tx * TILE + 1,
+            y: surfaceY - 15,
+            w: 23,
+            h: 15,
+            vx: 0,
+            health: 2,
+            direction: randomAt(i, 23) > 0.5 ? 1 : -1,
+            walkTime: randomAt(i, 31) * 4,
+            type: i % 3 === 0 ? "gallina" : "cerdo"
+          });
+        }
+
+        const startX = 5;
+        player.x = startX * TILE + 6;
+        player.y = (heights[startX] - 2) * TILE - player.h;
+      }
+
+      function setMessage(text) {
+        message = text;
+        messageTime = 2.4;
+      }
+
+      function tileAt(tx, ty) {
+        if (tx < 0 || tx >= WORLD_W || ty >= WORLD_H) return 2;
+        if (ty < 0) return 0;
+        return world[ty][tx];
+      }
+
+      function collides(x, y) {
+        const left = Math.floor(x / TILE);
+        const right = Math.floor((x + player.w - 1) / TILE);
+        const top = Math.floor(y / TILE);
+        const bottom = Math.floor((y + player.h - 1) / TILE);
+        for (let ty = top; ty <= bottom; ty++) {
+          for (let tx = left; tx <= right; tx++) {
+            if (tileAt(tx, ty) !== 0) return true;
+          }
+        }
+        return false;
+      }
+
+      function movePlayer(dt) {
+        const left = keys.has("a") || keys.has("arrowleft");
+        const right = keys.has("d") || keys.has("arrowright");
+        if (player.flying) {
+          const up = keys.has(" ") || keys.has("w") || keys.has("arrowup");
+          const down = keys.has("s") || keys.has("arrowdown");
+          const directionX = Number(right) - Number(left);
+          const directionY = Number(down) - Number(up);
+          const speed = 220;
+          const acceleration = 900;
+          const targetVX = directionX * speed;
+          const targetVY = directionY * speed;
+          player.vx += Math.max(-acceleration * dt, Math.min(acceleration * dt, targetVX - player.vx));
+          player.vy += Math.max(-acceleration * dt, Math.min(acceleration * dt, targetVY - player.vy));
+          if (!directionY) player.vy *= Math.max(0, 1 - dt * 4);
+          if (player.vx) player.facing = Math.sign(player.vx);
+          player.x = Math.max(0, Math.min(WORLD_W * TILE - player.w, player.x + player.vx * dt));
+          player.y = Math.max(0, Math.min(WORLD_H * TILE - player.h, player.y + player.vy * dt));
+          player.grounded = false;
+          return;
+        }
+        const crouching = keys.has("s") || keys.has("arrowdown") || keys.has("control");
+        const feet = player.y + player.h;
+        const oldHeight = player.h;
+        const targetHeight = crouching ? 20 : 31;
+        player.h = targetHeight;
+        player.y = feet - targetHeight;
+        if (targetHeight > oldHeight && collides(player.x, player.y)) {
+          player.h = oldHeight;
+          player.y = feet - oldHeight;
+        }
+        player.crouched = player.h < 31;
+
+        const direction = Number(right) - Number(left);
+        const maxSpeed = player.crouched ? 82 : 205;
+        const targetSpeed = direction * maxSpeed;
+        const acceleration = direction
+          ? (player.grounded ? 1450 : 820)
+          : (player.grounded ? 1900 : 420);
+        const speedChange = Math.max(-acceleration * dt, Math.min(acceleration * dt, targetSpeed - player.vx));
+        player.vx += speedChange;
+        if (player.vx) player.facing = Math.sign(player.vx);
+        const jumpHeld = keys.has(" ") || keys.has("w") || keys.has("arrowup");
+        if (jumpQueued && player.grounded) {
+          player.vy = -480;
+          player.grounded = false;
+          player.jumpHoldTime = 0;
+        }
+        jumpQueued = false;
+        if (jumpHeld && player.vy < 0 && player.jumpHoldTime < 0.2) {
+          player.vy += GRAVITY * 0.48 * dt;
+          player.jumpHoldTime += dt;
+        } else {
+          player.vy = Math.min(920, player.vy + GRAVITY * dt);
+        }
+
+        const moveX = player.vx * dt;
+        player.x += moveX;
+        if (collides(player.x, player.y)) {
+          const step = Math.sign(moveX);
+          if (step) {
+            while (collides(player.x, player.y)) player.x -= step;
+          }
+          player.vx = 0;
+        }
+        player.x = Math.max(0, Math.min(WORLD_W * TILE - player.w, player.x));
+
+        const moveY = player.vy * dt;
+        player.y += moveY;
+        const wasGrounded = player.grounded;
+        player.grounded = false;
+        if (collides(player.x, player.y)) {
+          const step = Math.sign(moveY);
+          if (step) {
+            while (collides(player.x, player.y)) player.y -= step;
+          }
+          if (moveY > 0) player.grounded = true;
+          player.vy = 0;
+        }
+        if (!wasGrounded && player.grounded) player.landTime = 0.16;
+        player.landTime = Math.max(0, player.landTime - dt);
+        const walking = player.grounded && Math.abs(player.vx) > 8 && !player.crouched;
+        player.walkBlend += ((walking ? 1 : 0) - player.walkBlend) * Math.min(1, dt * 12);
+        if (walking) player.walkTime += dt * (7 + Math.abs(player.vx) * 0.025);
+        if (player.y > WORLD_H * TILE) {
+          player.x = 5 * TILE;
+          player.y = (heights[5] - 2) * TILE - player.h;
+          player.vy = 0;
+          setMessage("Has vuelto al punto de partida.");
+        }
+      }
+
+      function targetTile() {
+        const tx = Math.floor((mouse.x + camera.x) / TILE);
+        const ty = Math.floor((mouse.y + camera.y) / TILE);
+        const px = (player.x + player.w / 2) / TILE;
+        const py = (player.y + player.h / 2) / TILE;
+        if (Math.hypot(tx + 0.5 - px, ty + 0.5 - py) > 5.3) return null;
+        return { tx, ty };
+      }
+
+      function dropTile(id, tx, ty) {
+        const block = BLOCKS[id];
+        if (!block) return;
+        droppedBlocks.push({
+          id,
+          item: block.item,
+          x: tx * TILE + TILE / 2 - 5,
+          y: ty * TILE + TILE / 2 - 5,
+          vx: (randomAt(elapsed * 100 + tx, ty) - 0.5) * 90,
+          vy: -100 - randomAt(tx, ty) * 55,
+          age: 0,
+          grounded: false,
+          bounces: 0
+        });
+        for (let i = 0; i < 5; i++) {
+          particles.push({
+            x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2,
+            vx: (randomAt(elapsed * 100 + i, tx) - 0.5) * 95,
+            vy: -40 - randomAt(i, ty) * 90, life: 0.45, color: block.color
+          });
+        }
+      }
+
+      function updateDroppedBlocks(dt) {
+        for (let i = droppedBlocks.length - 1; i >= 0; i--) {
+          const drop = droppedBlocks[i];
+          drop.age += dt;
+          const targetX = player.x + player.w / 2 - 5;
+          const targetY = player.y + player.h / 2 - 5;
+          const distance = Math.hypot(targetX - drop.x, targetY - drop.y);
+          if (!drop.grounded) {
+            drop.vy = Math.min(560, drop.vy + GRAVITY * dt);
+            drop.x += drop.vx * dt;
+            drop.y += drop.vy * dt;
+            const centerX = drop.x + 5;
+            const bottomY = drop.y + 10;
+            if (drop.vy > 0 && tileAt(Math.floor(centerX / TILE), Math.floor(bottomY / TILE)) !== 0) {
+              drop.y = Math.floor(bottomY / TILE) * TILE - 10;
+              if (drop.bounces < 1 && drop.vy > 90) {
+                drop.vy *= -0.28;
+                drop.bounces++;
+              } else {
+                drop.vy = 0;
+                drop.vx *= 0.75;
+                drop.grounded = true;
+              }
+            }
+          } else if (drop.age >= 0.32 && distance <= TILE) {
+            const dx = targetX - drop.x;
+            const dy = targetY - drop.y;
+            const speed = 230 + Math.min(250, distance * 1.8);
+            drop.x += dx / Math.max(distance, 1) * speed * dt;
+            drop.y += dy / Math.max(distance, 1) * speed * dt;
+            if (distance < 15) {
+              inventory[drop.item] = (inventory[drop.item] || 0) + 1;
+              droppedBlocks.splice(i, 1);
+            }
+          }
+        }
+      }
+
+      function updateMining(dt) {
+        if (!mouse.left) {
+          mining = null;
+          mineProgress = 0;
+          return;
+        }
+        const target = targetTile();
+        if (!target || target.tx < 0 || target.tx >= WORLD_W || target.ty < 0 || target.ty >= WORLD_H) {
+          mining = null;
+          mineProgress = 0;
+          return;
+        }
+        const id = world[target.ty][target.tx];
+        if (!id) {
+          mining = null;
+          mineProgress = 0;
+          return;
+        }
+        const key = `${target.tx},${target.ty}`;
+        if (mining !== key) {
+          mining = key;
+          mineProgress = 0;
+        }
+        const duration = id === 5 ? 0.9 : id === 2 ? 0.48 : id === 3 ? 0.32 : 0.22;
+        mineProgress += dt;
+        if (mineProgress >= duration) {
+          world[target.ty][target.tx] = 0;
+          dropTile(id, target.tx, target.ty);
+          mining = key;
+          mineProgress = 0;
+        }
+      }
+
+      function placeBlock() {
+        const target = targetTile();
+        if (!target || target.tx < 0 || target.tx >= WORLD_W || target.ty < 0 || target.ty >= WORLD_H) return;
+        const item = hotbar[selected];
+        const id = Object.keys(BLOCKS).map(Number).find(blockId => BLOCKS[blockId].item === item);
+        if (!id || !inventory[item]) {
+          setMessage(`No tienes ${BLOCKS[id]?.name.toLowerCase() || "ese bloque"}.`);
+          return;
+        }
+        if (world[target.ty][target.tx] !== 0) return;
+        const overlapsPlayer = target.tx * TILE < player.x + player.w &&
+          (target.tx + 1) * TILE > player.x &&
+          target.ty * TILE < player.y + player.h &&
+          (target.ty + 1) * TILE > player.y;
+        if (overlapsPlayer) {
+          setMessage("No puedes colocar un bloque dentro de ti.");
+          return;
+        }
+        world[target.ty][target.tx] = id;
+        inventory[item]--;
+      }
+
+      function attackAnimalAt(x, y) {
+        const targetX = x + camera.x;
+        const targetY = y + camera.y;
+        if (Math.hypot(targetX - (player.x + player.w / 2), targetY - (player.y + player.h / 2)) > TILE * 2) {
+          return false;
+        }
+        let closest = null;
+        let closestDistance = 30;
+        animals.forEach(animal => {
+          const distance = Math.hypot(targetX - (animal.x + animal.w / 2), targetY - (animal.y + animal.h / 2));
+          if (distance < closestDistance) {
+            closest = animal;
+            closestDistance = distance;
+          }
+        });
+        if (!closest) return false;
+        closest.health--;
+        closest.vx = (closest.x < player.x ? -1 : 1) * 105;
+        closest.direction = Math.sign(closest.vx);
+        setMessage(closest.health ? `¡Has golpeado al ${closest.type}!` : `El ${closest.type} dejó carne.`);
+        if (closest.health <= 0) {
+          droppedBlocks.push({
+            id: 0,
+            item: "carne",
+            x: closest.x + closest.w / 2 - 5,
+            y: closest.y,
+            vx: (closest.x < player.x ? -1 : 1) * 65,
+            vy: -95,
+            age: 0,
+            grounded: false,
+            bounces: 0
+          });
+          animals.splice(animals.indexOf(closest), 1);
+        }
+        return true;
+      }
+
+      function updateAnimals(dt) {
+        animals.forEach(animal => {
+          animal.walkTime += dt * Math.abs(animal.vx || 20) * 0.08;
+          if (Math.abs(animal.vx) < 6) {
+            if (randomAt(Math.floor(elapsed * 2), Math.floor(animal.x)) > 0.985) {
+              animal.direction *= -1;
+            }
+            animal.vx += animal.direction * 32 * dt;
+          } else {
+            animal.vx *= Math.max(0, 1 - dt * 2.4);
+            if (Math.abs(animal.vx) < 12) animal.vx = animal.direction * 22;
+          }
+          const nextX = animal.x + animal.vx * dt;
+          const frontX = animal.direction > 0 ? nextX + animal.w : nextX;
+          const tileX = Math.floor(frontX / TILE);
+          const bodyTileY = Math.floor((animal.y + animal.h / 2) / TILE);
+          const floorTileY = Math.floor((animal.y + animal.h + 4) / TILE);
+          if (tileAt(tileX, bodyTileY) !== 0 || tileAt(tileX, floorTileY) === 0 || tileX < 0 || tileX >= WORLD_W) {
+            if (Math.abs(animal.vx) < 45) animal.direction *= -1;
+            else animal.vx = -animal.vx * 0.45;
+          } else {
+            animal.x = nextX;
+          }
+          const groundY = Math.floor((animal.y + animal.h) / TILE);
+          if (tileAt(Math.floor((animal.x + animal.w / 2) / TILE), groundY) !== 0) {
+            animal.y = groundY * TILE - animal.h;
+          } else {
+            animal.y += 220 * dt;
+          }
+          animal.x = Math.max(0, Math.min(WORLD_W * TILE - animal.w, animal.x));
+        });
+      }
+
+      function addChatMessage(sender, text) {
+        const messageElement = document.createElement("div");
+        messageElement.className = "chat-message";
+        const senderElement = document.createElement("strong");
+        senderElement.textContent = `${sender}: `;
+        messageElement.append(senderElement, document.createTextNode(text));
+        chatMessages.append(messageElement);
+        while (chatMessages.childElementCount > 5) chatMessages.firstElementChild.remove();
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      function handleChatMessage(text) {
+        const command = text.trim().toLowerCase().replace(/^\/+/, "");
+        if (command === "volar" || command === "volar on") {
+          player.flying = true;
+          player.vy = 0;
+          addChatMessage("Sistema", "Modo vuelo activado. Usa Espacio/W/↑ para subir y S/↓ para bajar.");
+          return;
+        }
+        if (command === "volar off") {
+          player.flying = false;
+          player.vy = 0;
+          addChatMessage("Sistema", "Modo vuelo desactivado.");
+          return;
+        }
+        if (command === "comer") {
+          eatMeat();
+          addChatMessage("Sistema", `Carne: ${inventory.carne} · hambre: ${Math.round(player.hunger)}%.`);
+          return;
+        }
+        if (command === "ayuda") {
+          addChatMessage("Sistema", "Comandos: volar, volar off, comer. Chat disponible solo en esta partida.");
+          return;
+        }
+        addChatMessage("Tú", text.trim());
+      }
+
+      function eatMeat() {
+        if (inventory.carne < 1) {
+          setMessage("No tienes carne. Haz clic sobre un animal para conseguirla.");
+          return;
+        }
+        if (player.hunger >= 100) {
+          setMessage("No tienes hambre.");
+          return;
+        }
+        inventory.carne--;
+        player.hunger = Math.min(100, player.hunger + 35);
+        setMessage("Comiste carne. ¡Hambre recuperada!");
+      }
+
+      function update(dt) {
+        elapsed += dt;
+        dayTime = (dayTime + dt / 150) % 1;
+        clouds.forEach(cloud => {
+          cloud.x -= cloud.speed * dt;
+          if (cloud.x + cloud.width < -20) cloud.x = W + 30;
+        });
+        movePlayer(dt);
+        player.hunger = Math.max(0, player.hunger - dt * 0.12);
+        if (player.hunger === 0) {
+          player.starveClock += dt;
+          if (player.starveClock >= 2.5) {
+            player.health = Math.max(0, player.health - 5);
+            player.starveClock = 0;
+            if (player.health === 0) {
+              player.health = 60;
+              player.hunger = 30;
+              player.x = 5 * TILE + 6;
+              player.y = (heights[5] - 2) * TILE - player.h;
+              player.vx = 0;
+              player.vy = 0;
+              player.flying = false;
+              setMessage("Te desmayaste y volviste al campamento.");
+            }
+          }
+        } else {
+          player.starveClock = 0;
+        }
+        updateMining(dt);
+        updateDroppedBlocks(dt);
+        updateAnimals(dt);
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.life -= dt;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 220 * dt;
+          if (p.life <= 0) particles.splice(i, 1);
+        }
+        camera.x = Math.max(0, Math.min(WORLD_W * TILE - W, player.x + player.w / 2 - W / 2));
+        camera.y = Math.max(0, Math.min(WORLD_H * TILE - H, player.y + player.h / 2 - H / 2));
+        messageTime = Math.max(0, messageTime - dt);
+      }
+
+      function drawSky() {
+        const sunlight = Math.max(0, Math.sin(dayTime * Math.PI * 2));
+        const top = sunlight > 0 ? "#65b8d2" : "#182744";
+        const bottom = sunlight > 0 ? "#c5e5c7" : "#44516d";
+        const gradient = ctx.createLinearGradient(0, 0, 0, H);
+        gradient.addColorStop(0, top);
+        gradient.addColorStop(1, bottom);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, W, H);
+
+        if (sunlight <= 0.12) {
+          for (let i = 0; i < 55; i++) {
+            const sx = (i * 173 + 31) % W;
+            const sy = (i * 67 + 17) % 240;
+            ctx.globalAlpha = 0.35 + (Math.sin(elapsed * 2 + i) + 1) * 0.25;
+            ctx.fillStyle = "#fff6cb";
+            ctx.fillRect(sx, sy, 2, 2);
+          }
+          ctx.globalAlpha = 1;
+        }
+
+        const orbit = dayTime * Math.PI * 2 - Math.PI / 2;
+        const sunX = W * 0.5 + Math.cos(orbit) * W * 0.39;
+        const sunY = 218 - Math.sin(orbit) * 145;
+        ctx.fillStyle = sunlight > 0.08 ? "#ffe99b" : "#e4e9f4";
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, 24, 0, Math.PI * 2);
+        ctx.fill();
+
+        clouds.forEach(cloud => {
+          const x = cloud.x - camera.x * 0.16;
+          ctx.fillStyle = sunlight > 0.08 ? "#eff8edb8" : "#a8b5d17c";
+          ctx.fillRect(x, cloud.y, cloud.width, 13);
+          ctx.fillRect(x + 10, cloud.y - 7, cloud.width * 0.48, 12);
+          ctx.fillRect(x + cloud.width * 0.47, cloud.y - 3, cloud.width * 0.36, 10);
+        });
+
+        ctx.fillStyle = sunlight > 0.08 ? "#668f83" : "#343e59";
+        for (let i = 0; i < 12; i++) {
+          const x = i * 115 - (camera.x * 0.31 % 115);
+          const peak = 284 + (i % 3) * 29;
+          ctx.beginPath();
+          ctx.moveTo(x - 80, H);
+          ctx.lineTo(x + 48, peak);
+          ctx.lineTo(x + 160, H);
+          ctx.fill();
+        }
+      }
+
+      function drawBlock(id, x, y, tx, ty) {
+        const block = BLOCKS[id];
+        if (!block) return;
+        ctx.fillStyle = block.color;
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = block.edge;
+        ctx.fillRect(x, y + TILE - 4, TILE, 4);
+        if (id === 1 && tileAt(tx, ty - 1) === 0) {
+          ctx.fillStyle = "#78bd62";
+          ctx.fillRect(x, y, TILE, 5);
+          ctx.fillStyle = "#a0d477";
+          ctx.fillRect(x + 3, y, 6, 2);
+        } else if (id === 2) {
+          ctx.fillStyle = "#9ca5aa";
+          ctx.fillRect(x + 5, y + 6, 3, 3);
+          ctx.fillRect(x + 16, y + 15, 4, 3);
+        } else if (id === 3) {
+          ctx.fillStyle = "#c18a51";
+          ctx.fillRect(x + 5, y, 3, TILE);
+          ctx.fillRect(x + 17, y, 2, TILE);
+        } else if (id === 4) {
+          ctx.fillStyle = "#70b567";
+          ctx.fillRect(x + 4, y + 4, 5, 4);
+          ctx.fillRect(x + 15, y + 14, 4, 5);
+        } else if (id === 5) {
+          ctx.fillStyle = "#ffe09a";
+          ctx.fillRect(x + 5, y + 7, 5, 4);
+          ctx.fillRect(x + 15, y + 15, 4, 4);
+        }
+      }
+
+      function drawWorld() {
+        const startX = Math.max(0, Math.floor(camera.x / TILE));
+        const endX = Math.min(WORLD_W, Math.ceil((camera.x + W) / TILE) + 1);
+        const startY = Math.max(0, Math.floor(camera.y / TILE));
+        const endY = Math.min(WORLD_H, Math.ceil((camera.y + H) / TILE) + 1);
+        for (let ty = startY; ty < endY; ty++) {
+          for (let tx = startX; tx < endX; tx++) {
+            const id = world[ty][tx];
+            if (id) drawBlock(id, tx * TILE - camera.x, ty * TILE - camera.y, tx, ty);
+          }
+        }
+        ctx.fillStyle = "#293b43";
+        ctx.fillRect(0, WORLD_H * TILE - camera.y, W, H);
+      }
+
+      function drawDroppedBlocks() {
+        droppedBlocks.forEach(drop => {
+          const x = Math.round(drop.x - camera.x);
+          const y = Math.round(drop.y - camera.y);
+          if (drop.item === "carne") {
+            ctx.fillStyle = "#d77868";
+            ctx.fillRect(x, y + 2, 10, 7);
+            ctx.fillStyle = "#f1a08a";
+            ctx.fillRect(x + 2, y, 5, 3);
+            ctx.fillStyle = "#f1d6b1";
+            ctx.fillRect(x + 7, y + 3, 3, 2);
+            return;
+          }
+          const block = BLOCKS[drop.id];
+          if (!block) return;
+          ctx.fillStyle = block.edge;
+          ctx.fillRect(x - 1, y - 1, 12, 12);
+          ctx.fillStyle = block.color;
+          ctx.fillRect(x, y, 10, 10);
+          ctx.fillStyle = "#ffffff66";
+          ctx.fillRect(x + 2, y + 2, 3, 2);
+          if (drop.id === 5) {
+            ctx.fillStyle = "#ffe09a";
+            ctx.fillRect(x + 6, y + 5, 2, 2);
+          }
+        });
+      }
+
+      function drawAnimals() {
+        animals.forEach(animal => {
+          const x = Math.round(animal.x - camera.x);
+          const y = Math.round(animal.y - camera.y + Math.abs(Math.sin(animal.walkTime)) * 1.5);
+          if (animal.type === "gallina") {
+            ctx.fillStyle = "#f0e2c5";
+            ctx.fillRect(x + 5, y + 4, 13, 9);
+            ctx.fillRect(x + 14, y + 1, 7, 7);
+            ctx.fillStyle = "#d97858";
+            ctx.fillRect(x + 16, y, 4, 3);
+            ctx.fillRect(x + 21, y + 4, 4, 2);
+            ctx.fillStyle = "#e2a441";
+            ctx.fillRect(x + 8, y + 12, 2, 3);
+            ctx.fillRect(x + 15, y + 12, 2, 3);
+            ctx.fillStyle = "#283344";
+            ctx.fillRect(x + 19, y + 3, 2, 2);
+          } else {
+            ctx.fillStyle = "#dc9a70";
+            ctx.fillRect(x + 2, y + 5, 18, 9);
+            ctx.fillRect(x + 15, y + 2, 8, 8);
+            ctx.fillStyle = "#bd765d";
+            ctx.fillRect(x + 17, y, 3, 4);
+            ctx.fillRect(x + 21, y, 3, 4);
+            ctx.fillStyle = "#efc1a0";
+            ctx.fillRect(x + 21, y + 6, 4, 3);
+            ctx.fillStyle = "#283344";
+            ctx.fillRect(x + 21, y + 4, 2, 2);
+            ctx.fillStyle = "#714e45";
+            ctx.fillRect(x + 5, y + 13, 3, 2);
+            ctx.fillRect(x + 16, y + 13, 3, 2);
+          }
+          if (animal.health < 2) {
+            ctx.fillStyle = "#6b2334";
+            ctx.fillRect(x + 7, y - 5, 10, 2);
+            ctx.fillStyle = "#ef7474";
+            ctx.fillRect(x + 7, y - 5, 5, 2);
+          }
+        });
+      }
+
+      function drawPlayer() {
+        const x = Math.round(player.x - camera.x);
+        const y = Math.round(player.y - camera.y);
+        const airborne = !player.grounded;
+        const crouched = player.crouched;
+        const walk = Math.sin(player.walkTime) * 3 * player.walkBlend;
+        const bob = Math.abs(Math.sin(player.walkTime * 2)) * player.walkBlend;
+        const landSquash = player.landTime > 0 ? Math.sin(player.landTime / 0.16 * Math.PI) * 2 : 0;
+        const headY = y + (crouched ? 1 : 2) + bob + landSquash;
+        const torsoY = y + (crouched ? 10 : 12) + bob + landSquash;
+        const legY = y + (crouched ? 15 : 23);
+
+        ctx.fillStyle = "#202a3b";
+        ctx.fillRect(x + 2, torsoY, player.w - 4, Math.max(5, player.h - (crouched ? 14 : 12)));
+        ctx.fillStyle = "#e5ad76";
+        ctx.fillRect(x + 4, headY, 10, 10);
+        ctx.fillStyle = "#754c3c";
+        ctx.fillRect(x + 2, headY - 2, 13, 5);
+        ctx.fillRect(x + (player.facing > 0 ? 13 : 1), headY + 1, 4, 4);
+        ctx.fillStyle = "#527b9c";
+        ctx.fillRect(x + 2, torsoY, 13, crouched ? 7 : 11);
+        ctx.fillStyle = "#344b60";
+        const armY = torsoY + (crouched ? 1 : 2);
+        if (airborne && !crouched) {
+          ctx.fillRect(x - 1, armY - 3, 4, 8);
+          ctx.fillRect(x + 14, armY - 3, 4, 8);
+        } else {
+          ctx.fillRect(x + 1, armY + 1, 3, crouched ? 5 : 8);
+          ctx.fillRect(x + 13, armY + 1, 3, crouched ? 5 : 8);
+        }
+        ctx.fillStyle = "#e2d7bd";
+        if (crouched) {
+          ctx.fillRect(x + 1, legY, 7, 5);
+          ctx.fillRect(x + 9, legY, 7, 5);
+        } else if (airborne) {
+          ctx.fillRect(x + 2, legY - 2, 5, 7);
+          ctx.fillRect(x + 10, legY - 2, 5, 7);
+        } else {
+          const liftA = Math.max(0, walk);
+          const liftB = Math.max(0, -walk);
+          ctx.fillRect(x + 2 + walk, legY - liftA, 5, 7 + liftA);
+          ctx.fillRect(x + 10 - walk, legY - liftB, 5, 7 + liftB);
+        }
+        ctx.fillStyle = "#26374c";
+        ctx.fillRect(x + (player.facing > 0 ? 11 : 4), headY + 4, 2, 2);
+      }
+
+      function drawTarget() {
+        const target = targetTile();
+        if (!target || target.tx < 0 || target.tx >= WORLD_W || target.ty < 0 || target.ty >= WORLD_H) return;
+        const x = target.tx * TILE - camera.x;
+        const y = target.ty * TILE - camera.y;
+        ctx.strokeStyle = world[target.ty][target.tx] ? "#fff2bd" : "#ffffff9c";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2);
+        if (mining === `${target.tx},${target.ty}` && world[target.ty][target.tx]) {
+          const id = world[target.ty][target.tx];
+          const duration = id === 5 ? 0.9 : id === 2 ? 0.48 : id === 3 ? 0.32 : 0.22;
+          const progress = Math.min(1, mineProgress / duration);
+          ctx.fillStyle = "#ffefb8";
+          ctx.fillRect(x, y - 5, TILE * progress, 3);
+          if (progress > 0.12) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x + 2, y + 2, TILE - 4, TILE - 4);
+            ctx.clip();
+            ctx.strokeStyle = "#282323d9";
+            ctx.lineWidth = 1.6;
+            ctx.lineCap = "square";
+            const centerX = x + TILE * 0.52;
+            const centerY = y + TILE * 0.46;
+            const crackLines = [
+              [[centerX, centerY], [centerX - 4, centerY - 5], [centerX - 3, centerY - 9]],
+              [[centerX - 4, centerY - 5], [centerX - 9, centerY - 6], [centerX - 12, centerY - 10]],
+              [[centerX - 4, centerY - 5], [centerX - 6, centerY + 1], [centerX - 10, centerY + 4]],
+              [[centerX, centerY], [centerX + 5, centerY - 3], [centerX + 9, centerY - 8]],
+              [[centerX + 5, centerY - 3], [centerX + 8, centerY + 2], [centerX + 12, centerY + 4]],
+              [[centerX, centerY], [centerX + 2, centerY + 6], [centerX - 1, centerY + 10]]
+            ];
+            const visibleLines = Math.ceil(progress * crackLines.length);
+            crackLines.slice(0, visibleLines).forEach(points => {
+              ctx.beginPath();
+              ctx.moveTo(points[0][0], points[0][1]);
+              for (let point = 1; point < points.length; point++) {
+                ctx.lineTo(points[point][0], points[point][1]);
+              }
+              ctx.stroke();
+            });
+            ctx.restore();
+          }
+        }
+      }
+
+      function drawHud() {
+        ctx.fillStyle = "#111d2bdc";
+        ctx.fillRect(14, 14, 190, 56);
+        ctx.strokeStyle = "#d5d9c67c";
+        ctx.strokeRect(14.5, 14.5, 189, 55);
+        ctx.fillStyle = "#fff0bc";
+        ctx.font = "bold 15px Trebuchet MS, sans-serif";
+        ctx.fillText("TIERRAS SALVAJES", 25, 36);
+        ctx.fillStyle = "#d0deea";
+        ctx.font = "12px Trebuchet MS, sans-serif";
+        const timeLabel = Math.sin(dayTime * Math.PI * 2) > 0 ? "Día" : "Noche";
+        ctx.fillText(`${timeLabel}  ·  ${Math.floor(elapsed / 60) + 1}  ·  X ${Math.floor(player.x / TILE)}`, 25, 56);
+
+        ctx.fillStyle = "#111d2bdc";
+        ctx.fillRect(14, 77, 188, 49);
+        ctx.fillStyle = "#f0d8d1";
+        ctx.font = "bold 11px Trebuchet MS, sans-serif";
+        ctx.fillText("VIDA", 22, 94);
+        ctx.fillStyle = "#482d39";
+        ctx.fillRect(62, 85, 130, 10);
+        ctx.fillStyle = player.health > 30 ? "#d85d61" : "#ef844f";
+        ctx.fillRect(62, 85, 130 * player.health / 100, 10);
+        ctx.fillStyle = "#f5e5c4";
+        ctx.fillText("HAMBRE", 22, 115);
+        ctx.fillStyle = "#423b2a";
+        ctx.fillRect(62, 106, 130, 10);
+        ctx.fillStyle = player.hunger > 25 ? "#e5b34f" : "#db7250";
+        ctx.fillRect(62, 106, 130 * player.hunger / 100, 10);
+
+        const slot = 48;
+        const gap = 7;
+        const total = hotbar.length * slot + (hotbar.length - 1) * gap;
+        const originX = (W - total) / 2;
+        const originY = H - 71;
+        hotbar.forEach((item, index) => {
+          const x = originX + index * (slot + gap);
+          ctx.fillStyle = index === selected ? "#f5d477e8" : "#18263cdb";
+          ctx.fillRect(x, originY, slot, slot);
+          ctx.strokeStyle = index === selected ? "#fff4c4" : "#b9c5d58c";
+          ctx.lineWidth = index === selected ? 3 : 1;
+          ctx.strokeRect(x + 0.5, originY + 0.5, slot - 1, slot - 1);
+          const blockId = Number(Object.keys(BLOCKS).find(id => BLOCKS[id].item === item));
+          drawBlock(blockId, x + 12, originY + 9, -1, -1);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 11px Trebuchet MS, sans-serif";
+          ctx.fillText(String(index + 1), x + 4, originY + 13);
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "right";
+          ctx.font = "bold 13px Trebuchet MS, sans-serif";
+          ctx.fillText(String(inventory[item]), x + slot - 5, originY + slot - 5);
+          ctx.textAlign = "left";
+        });
+
+        if (messageTime > 0) {
+          const alpha = Math.min(1, messageTime * 2);
+          ctx.globalAlpha = alpha;
+          ctx.font = "bold 15px Trebuchet MS, sans-serif";
+          const width = ctx.measureText(message).width + 28;
+          ctx.fillStyle = "#142238d9";
+          ctx.fillRect((W - width) / 2, 25, width, 34);
+          ctx.fillStyle = "#fff2c5";
+          ctx.textAlign = "center";
+          ctx.fillText(message, W / 2, 47);
+          ctx.textAlign = "left";
+          ctx.globalAlpha = 1;
+        }
+
+        ctx.fillStyle = "#152539bd";
+        ctx.fillRect(W - 150, 15, 135, 48);
+        ctx.fillStyle = "#d6e5ec";
+        ctx.font = "12px Trebuchet MS, sans-serif";
+        ctx.fillText("Material elegido", W - 138, 28);
+        ctx.fillStyle = "#ffe59a";
+        ctx.font = "bold 13px Trebuchet MS, sans-serif";
+        ctx.fillText(`${BLOCKS[Number(Object.keys(BLOCKS).find(id => BLOCKS[id].item === hotbar[selected]))].name}  × ${inventory[hotbar[selected]]}`, W - 138, 41);
+        ctx.fillStyle = "#f5d6c3";
+        ctx.fillText(`Carne × ${inventory.carne}`, W - 138, 56);
+        if (player.flying) {
+          ctx.fillStyle = "#142238d9";
+          ctx.fillRect(W / 2 - 45, 70, 90, 25);
+          ctx.fillStyle = "#fff0bc";
+          ctx.textAlign = "center";
+          ctx.fillText("✦ VOLANDO ✦", W / 2, 87);
+          ctx.textAlign = "left";
+        }
+      }
+
+      function render() {
+        drawSky();
+        drawWorld();
+        drawAnimals();
+        drawDroppedBlocks();
+        drawPlayer();
+        drawTarget();
+        particles.forEach(p => {
+          ctx.globalAlpha = Math.max(0, p.life / 0.45);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x - camera.x, p.y - camera.y, 4, 4);
+        });
+        ctx.globalAlpha = 1;
+        drawHud();
+      }
+
+      function frame(timestamp) {
+        const dt = Math.min(0.033, (timestamp - lastTime) / 1000 || 0);
+        lastTime = timestamp;
+        update(dt);
+        render();
+        requestAnimationFrame(frame);
+      }
+
+      function pointerPosition(event) {
+        const bounds = canvas.getBoundingClientRect();
+        mouse.x = (event.clientX - bounds.left) * W / bounds.width;
+        mouse.y = (event.clientY - bounds.top) * H / bounds.height;
+      }
+
+      canvas.addEventListener("pointermove", pointerPosition);
+      canvas.addEventListener("pointerdown", event => {
+        pointerPosition(event);
+        canvas.setPointerCapture(event.pointerId);
+        if (event.button === 0 && !attackAnimalAt(mouse.x, mouse.y)) mouse.left = true;
+        if (event.button === 2) {
+          mouse.right = true;
+          placeBlock();
+        }
+      });
+      canvas.addEventListener("pointerup", event => {
+        if (event.button === 0) mouse.left = false;
+        if (event.button === 2) mouse.right = false;
+      });
+      canvas.addEventListener("pointercancel", () => { mouse.left = false; mouse.right = false; });
+      canvas.addEventListener("contextmenu", event => event.preventDefault());
+
+      window.addEventListener("keydown", event => {
+        const key = event.key.toLowerCase();
+        if (document.activeElement === chatInput) {
+          if (key === "escape") {
+            event.preventDefault();
+            chatPanel.hidden = true;
+            chatInput.blur();
+          }
+          return;
+        }
+        if (key === "enter") {
+          event.preventDefault();
+          chatPanel.hidden = false;
+          chatInput.focus();
+          keys.clear();
+          mouse.left = false;
+          return;
+        }
+        if (key === "e" && !event.repeat) {
+          eatMeat();
+          return;
+        }
+        if ([" ", "arrowleft", "arrowright", "arrowup", "arrowdown"].includes(key)) event.preventDefault();
+        if (!event.repeat && [" ", "w", "arrowup"].includes(key)) jumpQueued = true;
+        keys.add(key);
+        if (/^[1-5]$/.test(key)) selected = Number(key) - 1;
+      });
+      window.addEventListener("keyup", event => keys.delete(event.key.toLowerCase()));
+      window.addEventListener("blur", () => {
+        keys.clear();
+        mouse.left = false;
+        mouse.right = false;
+      });
+
+      chatForm.addEventListener("submit", event => {
+        event.preventDefault();
+        const text = chatInput.value.trim();
+        if (text) handleChatMessage(text);
+        chatInput.value = "";
+        chatPanel.hidden = true;
+        chatInput.blur();
+      });
+
+      generateWorld();
+      addChatMessage("Sistema", "Chat local listo. Escribe «volar» para activar el vuelo.");
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
